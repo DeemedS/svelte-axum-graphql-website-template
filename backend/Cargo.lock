@@ -312,6 +312,7 @@ dependencies = [
  "dotenvy",
  "headers",
  "jsonwebtoken",
+ "regex",
  "serde",
  "sha2",
  "sqlx",
