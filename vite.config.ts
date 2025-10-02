@@ -2,6 +2,7 @@ import devtoolsJson from 'vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
 	plugins: [
@@ -9,6 +10,13 @@ export default defineConfig({
 		sveltekit(),
 		devtoolsJson()
 	],
+	resolve: {
+		alias: {
+			$components: path.resolve('./src/components'),
+			$styles: path.resolve('./src/styles'),
+			$lib: path.resolve('./src/lib')
+		}
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
