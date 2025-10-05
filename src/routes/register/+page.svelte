@@ -19,7 +19,9 @@
 	// --- reactive validations ---
 	$: emailError = emailTouched ? isRequired(email, 'Email') || isEmail(email) : undefined;
 	$: passwordError = passwordTouched ? passwordRules(password) : undefined;
-	$: confirmError = confirmTouched ? isRequired(confirm, 'Confirm Password') || confirmPassword(confirm, password) : undefined;
+	$: confirmError = confirmTouched
+		? isRequired(confirm, 'Confirm Password') || confirmPassword(confirm, password)
+		: undefined;
 
 	$: formValid = email && password && confirm && !emailError && !passwordError && !confirmError;
 
@@ -36,12 +38,16 @@
 		serverError = null;
 
 		try {
-			const data = await gql<{ register: boolean }>(REGISTER_MUTATION, { email, password });
-			if (data.register === true) {
+			const data = await gql<{ register: { success: boolean; message: string } }>(
+				REGISTER_MUTATION,
+				{ email, password }
+			);
+
+			if (data.register.success) {
 				success = true;
 				password = confirm = '';
 			} else {
-				serverError = 'Registration failed.';
+				serverError = data.register.message || 'Registration failed.';
 			}
 		} catch (err: any) {
 			serverError = err.message;
@@ -53,10 +59,10 @@
 
 <main class="flex min-h-screen items-center justify-center bg-gray-100 p-6">
 	{#if success}
-		<div class="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg text-center">
+		<div class="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-lg">
 			<h1 class="text-xl font-semibold text-green-600">Registration Successful!</h1>
 			<div class="mt-4">
-				<a href="/login" class="text-blue-600 hover:underline font-semibold">Go to Login</a>
+				<a href="/login" class="font-semibold text-blue-600 hover:underline">Go to Login</a>
 			</div>
 		</div>
 	{:else}
