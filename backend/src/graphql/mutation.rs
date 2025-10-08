@@ -1,11 +1,10 @@
 use crate::auth::jwt::create_jwt;
 use crate::auth::refresh::{create_refresh_token, refresh_access_token};
+use crate::utils::validation::{validate_email, validate_password};
 use async_graphql::{Context, Object, Result, SimpleObject};
 use bcrypt::{hash, verify, DEFAULT_COST};
-use regex::Regex;
 use sqlx::PgPool;
 
-/// Response object for login/refresh mutation
 #[derive(SimpleObject)]
 pub struct LoginResponse {
     success: bool,
@@ -24,72 +23,30 @@ pub struct MutationRoot;
 
 #[Object]
 impl MutationRoot {
-    /// Register a new user
     async fn register(
         &self,
         ctx: &Context<'_>,
         email: String,
         password: String,
     ) -> Result<RegisterResponse> {
-        // --- Input Validations ---
-        if email.trim().is_empty() {
+        // --- Validation ---
+        if let Err(msg) = validate_email(&email) {
             return Ok(RegisterResponse {
                 success: false,
-                message: Some("Email is required".to_string()),
+                message: Some(msg),
             });
         }
 
-        let email_regex = Regex::new(r"^\S+@\S+\.\S+$").unwrap();
-        if !email_regex.is_match(&email) {
+        if let Err(msg) = validate_password(&password) {
             return Ok(RegisterResponse {
                 success: false,
-                message: Some("Invalid email address".to_string()),
+                message: Some(msg),
             });
         }
 
-        if password.trim().is_empty() {
-            return Ok(RegisterResponse {
-                success: false,
-                message: Some("Password is required".to_string()),
-            });
-        }
+        let hashed = hash(password, DEFAULT_COST)
+            .map_err(|_| async_graphql::Error::new("Failed to hash password"))?;
 
-        if password.len() < 8 {
-            return Ok(RegisterResponse {
-                success: false,
-                message: Some("Password must be at least 8 characters".to_string()),
-            });
-        }
-
-        if !password.chars().any(|c| c.is_ascii_uppercase()) {
-            return Ok(RegisterResponse {
-                success: false,
-                message: Some("Password must contain at least one uppercase letter".to_string()),
-            });
-        }
-
-        if !password
-            .chars()
-            .any(|c| "!@#$%^&*(),.?\":{}|<>".contains(c))
-        {
-            return Ok(RegisterResponse {
-                success: false,
-                message: Some("Password must contain at least one special character".to_string()),
-            });
-        }
-
-        // --- Hash password ---
-        let hashed = match hash(password, DEFAULT_COST) {
-            Ok(h) => h,
-            Err(_) => {
-                return Ok(RegisterResponse {
-                    success: false,
-                    message: Some("Failed to hash password".to_string()),
-                });
-            }
-        };
-
-        // --- Insert into database ---
         let pool = ctx.data::<PgPool>()?;
         let result = sqlx::query("INSERT INTO users (email, password_hash) VALUES ($1, $2)")
             .bind(&email)
@@ -100,26 +57,25 @@ impl MutationRoot {
         match result {
             Ok(_) => Ok(RegisterResponse {
                 success: true,
-                message: Some("Registration successful".to_string()),
+                message: Some("Registration successful".into()),
             }),
             Err(err) => {
                 if let Some(db_err) = err.as_database_error() {
                     if db_err.code().as_deref() == Some("23505") {
                         return Ok(RegisterResponse {
                             success: false,
-                            message: Some("Email already exists".to_string()),
+                            message: Some("Email already exists".into()),
                         });
                     }
                 }
                 Ok(RegisterResponse {
                     success: false,
-                    message: Some("Failed to register user".to_string()),
+                    message: Some("Failed to register user".into()),
                 })
             }
         }
     }
 
-    /// Login an existing user
     async fn login(
         &self,
         ctx: &Context<'_>,
@@ -140,31 +96,31 @@ impl MutationRoot {
             if verify(&password, &hash)? {
                 let access_token = create_jwt(&id.to_string());
                 let refresh_token = create_refresh_token(pool, id).await?;
-                Ok(LoginResponse {
+
+                return Ok(LoginResponse {
                     success: true,
-                    message: Some("Login successful".to_string()),
+                    message: Some("Login successful".into()),
                     access_token: Some(access_token),
                     refresh_token: Some(refresh_token),
-                })
+                });
             } else {
-                Ok(LoginResponse {
+                return Ok(LoginResponse {
                     success: false,
-                    message: Some("Invalid username or password".to_string()),
+                    message: Some("Invalid username or password".into()),
                     access_token: None,
                     refresh_token: None,
-                })
+                });
             }
-        } else {
-            Ok(LoginResponse {
-                success: false,
-                message: Some("User not found".to_string()),
-                access_token: None,
-                refresh_token: None,
-            })
         }
+
+        Ok(LoginResponse {
+            success: false,
+            message: Some("User not found".into()),
+            access_token: None,
+            refresh_token: None,
+        })
     }
 
-    /// Refresh access token using refresh token
     async fn refresh_token(&self, ctx: &Context<'_>, token: String) -> Result<LoginResponse> {
         let pool = ctx.data::<PgPool>()?;
 

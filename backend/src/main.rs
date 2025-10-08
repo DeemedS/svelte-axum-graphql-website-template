@@ -5,17 +5,20 @@ use axum::{
     routing::get,
     serve, Router,
 };
+use axum_extra::{extract::cookie::{Cookie, CookieJar, SameSite}, TypedHeader};
 use dotenvy::dotenv;
 use std::{env, net::SocketAddr};
+use time::Duration;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
+use serde_json::Value;
 
 mod auth;
 mod db;
 mod graphql;
+mod utils;
 
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse};
-use axum_extra::typed_header::TypedHeader;
 use graphql::{AppSchema, MutationRoot, QueryRoot};
 use headers::{authorization::Bearer, Authorization};
 
@@ -56,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => None,
     };
-
+    
     let mut app = Router::new()
         .route("/", get(graphiql).post(graphql_handler))
         .layer(Extension(schema));
@@ -74,25 +77,54 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn graphql_handler(
+
+pub async fn graphql_handler(
     Extension(schema): Extension<AppSchema>,
     auth: Option<TypedHeader<Authorization<Bearer>>>,
     req: GraphQLRequest,
-) -> GraphQLResponse {
+) -> impl IntoResponse {
     let mut request = req.into_inner();
 
-    let auth_result = if let Some(TypedHeader(Authorization(bearer))) = auth {
-        match crate::auth::jwt::validate_jwt(bearer.token()) {
-            Some(claims) => Ok(crate::auth::extractor::AuthUser(claims.sub)),
-            None => Err("Invalid token"),
+    // Inject user claims if JWT is valid
+    if let Some(TypedHeader(Authorization(bearer))) = auth {
+        if let Some(claims) = crate::auth::jwt::validate_jwt(bearer.token()) {
+            request = request.data(crate::auth::extractor::AuthUser(claims.sub));
         }
-    } else {
-        Err("Missing token")
-    };
+    }
 
-    request = request.data(auth_result);
-    schema.execute(request).await.into()
+    let response = schema.execute(request).await;
+
+    let json_response = serde_json::to_value(&response).unwrap_or(Value::Null);
+
+    let mut jar = CookieJar::new();
+
+    if let Some(access_token) = json_response["data"]["login"]["accessToken"].as_str() {
+        if let Some(refresh_token) = json_response["data"]["login"]["refreshToken"].as_str() {
+            jar = jar.add(
+                Cookie::build(("access_token", access_token.to_string()))
+                    .path("/")
+                    .http_only(true)
+                    .secure(true)
+                    .same_site(SameSite::Lax)
+                    .max_age(Duration::minutes(15))
+                    .build(),
+            );
+            jar = jar.add(
+                Cookie::build(("refresh_token", refresh_token.to_string()))
+                    .path("/")
+                    .http_only(true)
+                    .secure(true)
+                    .same_site(SameSite::Lax)
+                    .max_age(Duration::days(7))
+                    .build(),
+            );
+        }
+    }
+
+    let gql_resp = GraphQLResponse::from(response);
+    (jar, gql_resp).into_response()
 }
+
 
 async fn graphiql() -> impl IntoResponse {
     Html(

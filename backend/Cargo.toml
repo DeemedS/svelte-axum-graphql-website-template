@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 # --- Web framework ---
 axum = { version = "0.8", features = ["macros"] }
-axum-extra = { version = "0.10", features = ["typed-header"] }
+axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 tokio = { version = "1", features = ["full"] }
@@ -38,3 +38,5 @@ chrono = "0.4.42"
 uuid = { version = "1.1", features = ["v4"] }
 sha2 = "0.10.9"
 regex = "1.11.3"
+time = { version = "0.3", features = ["macros"] }
+serde_json = "1.0"

@@ -9,6 +9,7 @@ export async function gql<T>(
     const resp = await fetch(GRAPHQL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ query, variables }),
     });
 
@@ -17,8 +18,14 @@ export async function gql<T>(
     }
 
     const json = await resp.json();
+
+    if (!json.data) {
+        throw new Error('No data returned from GraphQL server');
+    }
+
     if (json.errors) {
         throw new Error(json.errors.map((e: any) => e.message).join('; '));
     }
-    return json.data;
+
+    return json.data as T;
 }
